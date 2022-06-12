@@ -21,12 +21,19 @@ There are two types of GCNs based on their correlation (adjacency) matrices:
 As mentioned in the paper of Z-M. Chen, et al, in order to build the static GCN, we need to make a static correlation matrix as *an explicit relationship* between labels and try to enhance the relationship of the embedded words, which indicates *the implicit relation* between labels, with this correlation matrix. <br >
 The structures of CNN-GCN & GCN are shown in the images below:
 ![gcn](https://user-images.githubusercontent.com/85555218/173224754-5c02046d-133b-4c75-8162-261f911fba05.png)
+![gcn](https://user-images.githubusercontent.com/85555218/173225823-6846cc2e-1579-43a2-9cbe-cb2e926a2955.png)
 
 **Static Correlation (Adjacency) Matrix:** <br >
 model the label correlation dependency as a conditional probability
 
 **Word Embedding:** <br >
+As shown in the images above, the labels need to be vectorized before they are sent to GCN. There are many word embedding techniques, but for static GCN we use GloVe embeddings, which have shown better results than the other methods. <br >
+*(different word embeddings will hardly affect the accuracy, which reveals improvements do not absolutely come from the semantic meanings derived from word embeddings, rather than our GCN)* <br>
+The image below shows the relations between labels after using the word embedding technique (t-sne: 300d -> 2d):
+![t-sne_glove](https://user-images.githubusercontent.com/85555218/173227980-947b5dce-4352-4ee5-8863-004aa06db1ba.png)
 
+The image below shows the relations between labels after training by GCN (t-sne: 2048d -> 2d):
+![t-sne_xception](https://user-images.githubusercontent.com/85555218/173228140-28f372a3-ab26-452c-9f6e-425f3710fc84.png)
 
 ### 2. Dynamic GCN
 coming soon ...
