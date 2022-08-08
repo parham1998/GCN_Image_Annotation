@@ -12,107 +12,21 @@ import numpy as np
 # =============================================================================
 # CNNs
 # =============================================================================
-class ResNet101(nn.Module):
-    def __init__(self, pretrained, with_fc=False, sam=False):
-        super(ResNet101, self).__init__()
-        self.path = './checkpoints/ResNet101_Corel-5K.pth'
-        self.name = 'ResNet101'
-        self.with_fc = with_fc
-        self.sam = sam  # semantic attention module
-
-        resnet = torchvision.models.resnet101(pretrained=pretrained)
-        #
+class TResNet(nn.Module):
+    def __init__(self, pretrained):
+        super(TResNet, self).__init__()
+        self.path = './checkpoints/TResNet_Corel-5K.pth'
+        self.name = 'TResNet'
+        
+        tresnet = timm.create_model('tresnet_m', pretrained=pretrained)
         self.features = nn.Sequential(
-            resnet.conv1,
-            resnet.bn1,
-            resnet.relu,
-            resnet.maxpool,
-            resnet.layer1,
-            resnet.layer2,
-            resnet.layer3,
-            resnet.layer4,
+            tresnet.body,
+            tresnet.head.global_pool,
         )
-        self.pooling = nn.AdaptiveAvgPool2d(1)
-        if with_fc:
-            self.fc = nn.Sequential(
-                nn.Dropout(p=0.3),
-                nn.Linear(in_features=2048, out_features=1024)
-            )
-
+            
     def forward(self, img):
         feature = self.features(img)
-        if self.sam is False:
-            feature = self.pooling(feature)
-            feature = torch.flatten(feature, 1)
-        if self.with_fc:
-            feature = self.fc(feature)
-        return feature
-
-
-class ResNeXt50(nn.Module):
-    def __init__(self, pretrained, with_fc=False, sam=False):
-        super(ResNeXt50, self).__init__()
-        self.path = './checkpoints/ResNext50_Corel-5K.pth'
-        self.name = 'ResNeXt50'
-        self.with_fc = with_fc
-        self.sam = sam  # semantic attention module
-
-        resnext = torchvision.models.resnext50_32x4d(pretrained=pretrained)
-        #
-        self.features = nn.Sequential(
-            resnext.conv1,
-            resnext.bn1,
-            resnext.relu,
-            resnext.maxpool,
-            resnext.layer1,
-            resnext.layer2,
-            resnext.layer3,
-            resnext.layer4,
-        )
-        self.pooling = nn.AdaptiveAvgPool2d(1)
-        if with_fc:
-            self.fc = nn.Sequential(
-                nn.Dropout(p=0.3),
-                nn.Linear(in_features=2048, out_features=1024)
-            )
-
-    def forward(self, img):
-        feature = self.features(img)
-        if self.sam is False:
-            feature = self.pooling(feature)
-            feature = torch.flatten(feature, 1)
-        if self.with_fc:
-            feature = self.fc(feature)
-        return feature
-
-
-class Xception(nn.Module):
-    def __init__(self, pretrained, with_fc=False, sam=False):
-        super(Xception, self).__init__()
-        self.path = './checkpoints/Xception_Corel-5K.pth'
-        self.name = 'Xception'
-        self.with_fc = with_fc
-        self.sam = sam  # semantic attention module
-
-        xception = timm.create_model('xception', pretrained=pretrained)
-        #
-        self.features = nn.Sequential(
-            *(list(xception.children())[:-2]),
-        )
-        self.pooling = nn.AdaptiveAvgPool2d(1)
-        if with_fc:
-            self.fc = nn.Sequential(
-                nn.Dropout(p=0.3),
-                nn.Linear(in_features=2048, out_features=1024)
-            )
-
-    def forward(self, img):
-        feature = self.features(img)
-        if self.sam is False:
-            feature = self.pooling(feature)
-            feature = torch.flatten(feature, 1)
-        if self.with_fc:
-            feature = self.fc(feature)
+        feature = torch.flatten(feature, 1)
         return feature
 
 
@@ -155,7 +69,7 @@ class GCNCNN(nn.Module):
         self.gcn1_path = './checkpoints/' + model.name + '_GCN1_Corel-5K.pth'
         self.gcn2_path = './checkpoints/' + model.name + '_GCN2_Corel-5K.pth'
 
-        # CNN model
+        # CNN model (features)
         self.cnn = model
 
         self.gc1 = GraphConvolution(input_d, middle_d)
@@ -193,7 +107,7 @@ class GCNCNN(nn.Module):
 
     def get_config_optim(self, lr):
         return [
-            {'params': self.cnn.parameters(), 'lr': lr * 0.5},
+            {'params': self.cnn.parameters(), 'lr': lr},
             {'params': self.gc1.parameters(), 'lr': lr},
             {'params': self.gc2.parameters(), 'lr': lr},
         ]

@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from dataset import AnnotationDataset, corel_5k
 from models import *
-from loss_functions import *
+from loss_function import *
 
 torch.manual_seed(1)
 np.random.seed(1)
@@ -41,7 +41,7 @@ else:
 # Load data & data preprocessing
 # =============================================================================
 (batch_size, worker, input_size, root,
- mean, std, transform_train, transform_test) = corel_5k()
+ mean, std, transform_train, transform_validation) = corel_5k()
 
 trainset = AnnotationDataset(root=os.path.join(root, 'images'),
                              annotation_path=os.path.join(root, 'train.json'),
@@ -50,7 +50,7 @@ trainset = AnnotationDataset(root=os.path.join(root, 'images'),
 
 testset = AnnotationDataset(root=os.path.join(root, 'images'),
                             annotation_path=os.path.join(root, 'test.json'),
-                            transforms=transform_test)
+                            transforms=transform_validation)
 
 classes = trainset.classes
 
@@ -149,13 +149,6 @@ def adjacency(num_classes, t=0.1, p=0.2):
     adj = adj * p / (adj.sum(0, keepdims=True) + K.epsilon())
     adj = adj + (1-p) * np.identity(num_classes, np.int32)
     return torch.Tensor(adj)
-    '''adj = adj * p / (adj.sum(0, keepdims=True) + 1e-6)
-    adj = adj + np.identity(num_classes, np.int32)
-    adj = torch.from_numpy(adj).float()
-    D = torch.pow(adj.sum(1).float(), -0.5)
-    D = torch.diag(D)
-    adj = torch.matmul(torch.matmul(adj, D).t(), D)
-    return adj'''
 
 
 adj = adjacency(len(classes))
@@ -221,7 +214,7 @@ tsne_plot(emb, classes)
 # =============================================================================
 # Model
 # =============================================================================
-cnn = ResNeXt50(pretrained=True)
+cnn = TResNet(pretrained=True)
 GCN_CNN = GCNCNN(cnn)
 print(GCN_CNN)
 
@@ -229,26 +222,38 @@ print(GCN_CNN)
 # =============================================================================
 # Specify loss function and optimizer
 # =============================================================================
-lossFunction = 'MultiLabelSoftMarginLoss'
-if lossFunction == 'MultiLabelSoftMarginLoss':
+lossFunction = 'AsymmetricLoss'
+if lossFunction == 'BCELoss':
     criterion = nn.MultiLabelSoftMarginLoss()
-elif lossFunction == 'LSEP':
-    criterion = LSEPLoss()
-elif lossFunction == 'focalloss':
-    gamma = 3
-    from torchvision.ops.focal_loss import sigmoid_focal_loss
+elif lossFunction == 'FocalLoss':
+    criterion = MultiLabelLoss(gamma_neg=3, 
+							   gamma_pos=3,
+							   neg_margin=0)
+elif lossFunction == 'AsymmetricLoss':
+    criterion = MultiLabelLoss(gamma_neg=4,
+							   gamma_pos=0,
+							   neg_margin=0.05)
 
 
 opt = "Adam"
 if opt == "SGD":
     epochs = 200
-    lr = 0.01
-    optimizer = optim.SGD(GCN_CNN.get_config_optim(
-        lr=lr), lr=lr, momentum=0.9, weight_decay=1e-4)
+    lr = 0.5
+    optimizer = optim.SGD(GCN_CNN.get_config_optim(lr=lr), 
+					      lr=lr, 
+						  momentum=0.9, 
+						  weight_decay=1e-4)
 elif opt == "Adam":
-    epochs = 50
+    epochs = 80
     lr = 0.0001
-    optimizer = optim.Adam(GCN_CNN.get_config_optim(lr=lr), lr=lr)
+    optimizer = optim.Adam(GCN_CNN.get_config_optim(lr=lr),
+						   lr=lr)
+    steps_per_epoch = len(trainloader)
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, 
+											  max_lr=lr, 
+											  steps_per_epoch=steps_per_epoch, 
+											  epochs=epochs, 
+                                              pct_start=0.2)
 
 
 def adjust_learning_rate():
@@ -302,8 +307,8 @@ def N_plus(targets, outputs):
     return torch.sum(torch.gt(tp, 0).int())
 
 
-def calculate_metrics(targets, outputs, threshold=0):
-    if threshold == 0:
+def calculate_metrics(targets, outputs, threshold):
+    if threshold == 0.5:
         outputs = torch.gt(outputs, threshold).float()
     else:
         for i in range(len(classes)):
@@ -332,18 +337,18 @@ best_per_class_f1 = 0
 
 # losses per epoch
 train_losses = []
-test_losses = []
+valid_losses = []
 
 
 # ===========
 # train part
 # ===========
-def train(epoch):
+def train(epoch, dataloader, thresholds=0.5):
     GCN_CNN.train()
     train_loss = 0
     total_outputs = []
     total_targets = []
-    for batch_idx, (images, targets) in enumerate(tqdm(trainloader)):
+    for batch_idx, (images, targets) in enumerate(tqdm(dataloader)):
 
         if train_on_GPU:
             images, targets = images.cuda(), targets.cuda()
@@ -356,11 +361,7 @@ def train(epoch):
         outputs = GCN_CNN(images, emb, adj)
 
         # calculate the batch loss
-        if lossFunction == 'focalloss':
-            loss = sigmoid_focal_loss(
-                outputs, targets, alpha=-1, gamma=gamma, reduction="mean")
-        else:
-            loss = criterion(outputs, targets)
+        loss = criterion(outputs, targets)
 
         # backward pass: compute gradient of the loss with respect to
         # the model parameters
@@ -371,63 +372,64 @@ def train(epoch):
 
         # parameters update
         optimizer.step()
+        
+        if opt == 'Adam':
+            scheduler.step()
 
         train_loss += loss.item()
-        total_outputs.append(outputs)
+        total_outputs.append(torch.sigmoid(outputs))
         total_targets.append(targets)
 
     train_losses.append(train_loss/(batch_idx+1))
     result = calculate_metrics(
-        torch.cat(total_targets), torch.cat(total_outputs))
+        torch.cat(total_targets), torch.cat(total_outputs), thresholds)
     print('Epoch: {}'.format(epoch+1))
     print('Train Loss: {:.5f}'.format(train_loss/(batch_idx+1)))
     print('N+: {:.0f}'.format(result['N+']))
-    print('per-class precision: {:.3f} \t per-class recall: {:.3f} \t per-class f1: {:.3f}'.format(
+    print('per-class precision: {:.4f} \t per-class recall: {:.4f} \t per-class f1: {:.4f}'.format(
         result['per_class/precision'], result['per_class/recall'], result['per_class/f1']))
-    print('per-image precision: {:.3f} \t per-image recall: {:.3f} \t per-image f1: {:.3f}'.format(
+    print('per-image precision: {:.4f} \t per-image recall: {:.4f} \t per-image f1: {:.4f}'.format(
         result['per_image/precision'], result['per_image/recall'], result['per_image/f1']))
 
 
 # ==============
-# test part
+# validation part
 # ==============
-def test(epoch):
+def validation(dataloader, mcc=False, thresholds=0.5):
     GCN_CNN.eval()
-    test_loss = 0
+    valid_loss = 0
     total_outputs = []
     total_targets = []
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(tqdm(testloader)):
+        for batch_idx, (images, targets) in enumerate(tqdm(dataloader)):
 
             if train_on_GPU:
                 images, targets = images.cuda(), targets.cuda()
 
             outputs = GCN_CNN(images, emb, adj)
-
-            if lossFunction == 'focalloss':
-                loss = sigmoid_focal_loss(
-                    outputs, targets, alpha=-1, gamma=gamma, reduction="mean")
-            else:
+            
+            if not mcc:
                 loss = criterion(outputs, targets)
+                valid_loss += loss.item()
 
-            test_loss += loss.item()
-            total_outputs.append(outputs)
+            total_outputs.append(torch.sigmoid(outputs))
             total_targets.append(targets)
 
-    test_losses.append(test_loss/(batch_idx+1))
+    valid_losses.append(valid_loss/(batch_idx+1))
     result = calculate_metrics(
-        torch.cat(total_targets), torch.cat(total_outputs))
-    print('Test Loss: {:.5f}'.format(test_loss/(batch_idx+1)))
+        torch.cat(total_targets), torch.cat(total_outputs), thresholds)
+    if not mcc:
+        print('Validation Loss: {:.5f}'.format(valid_loss/(batch_idx+1)))
     print('N+: {:.0f}'.format(result['N+']))
-    print('per-class precision: {:.3f} \t per-class recall: {:.3f} \t per-class f1: {:.3f}'.format(
+    print('per-class precision: {:.4f} \t per-class recall: {:.4f} \t per-class f1: {:.4f}'.format(
         result['per_class/precision'], result['per_class/recall'], result['per_class/f1']))
-    print('per-image precision: {:.3f} \t per-image recall: {:.3f} \t per-image f1: {:.3f}'.format(
+    print('per-image precision: {:.4f} \t per-image recall: {:.4f} \t per-image f1: {:.4f}'.format(
         result['per_image/precision'], result['per_image/recall'], result['per_image/f1']))
 
     # save model if test accuracy has increased
     global best_per_class_f1
     if result['per_class/f1'] > best_per_class_f1:
-        print('Test per-class f1 increased ({:.3f} --> {:.3f}). saving model ...'.format(
+        print('Test per-class f1 increased ({:.4f} --> {:.4f}). saving model ...'.format(
             best_per_class_f1, result['per_class/f1']))
         GCN_CNN.save(cnn.path)
         best_per_class_f1 = result['per_class/f1']
@@ -436,13 +438,18 @@ def test(epoch):
 print('==> Start Training ...')
 for epoch in range(epochs):
     start = timeit.default_timer()
-    train(epoch)
-    test(epoch)
-    if opt == "SGD" and epoch == 99:
+    train(epoch, trainloader)
+    validation(testloader)
+    if opt == "SGD" and (epoch == 49 or epoch == 99):
         adjust_learning_rate()
         print(optimizer)
+    elif opt == 'Adam':
+        print('LR {:.1e}'.format(scheduler.get_last_lr()[0]))
     stop = timeit.default_timer()
     print('time: {:.3f}'.format(stop - start))
+    # early stop
+    if opt == "Adam" and epoch == 59:
+        break
 print('==> End of training ...')
 
 
@@ -475,7 +482,7 @@ tsne_plot(np.array(new_emb.transpose(0, 1).detach().cpu()), classes)
 # =============================================================================
 # Matthew correlation coefficient (threshold optimization)
 # =============================================================================
-def matthew_corrcoef():
+def matthew_corrcoef(dataloader):
     o = []
     t = []
 
@@ -483,13 +490,12 @@ def matthew_corrcoef():
     total_outputs = []
     total_targets = []
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(trainloader):
+        for batch_idx, (images, targets) in enumerate(dataloader):
 
             if train_on_GPU:
                 images, targets = images.cuda(), targets.cuda()
 
-            outputs = GCN_CNN(images, emb, adj)
-            outputs = torch.sigmoid(outputs)
+            outputs = torch.sigmoid(GCN_CNN(images, emb, adj))
 
             total_outputs.append(outputs)
             total_targets.append(targets)
@@ -500,76 +506,44 @@ def matthew_corrcoef():
     o = np.array(o[0].cpu())
 
     best_thresholds = []
-    threshold = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35,
-                 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
+    threshold = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
     for i in range(len(classes)):
-        a = []
+        mcc = []
         for j in threshold:
             hold = o[:, i].copy()
             hold[hold >= j] = 1
             hold[hold < j] = 0
-            a.append(matthews_corrcoef(t[:, i], hold))
-        best_thresholds.append(threshold[np.argmax(a)])
+            mcc.append(matthews_corrcoef(t[:, i], hold))
+        best_thresholds.append(threshold[np.argmax(mcc)])
 
     return best_thresholds
 
 
-best_thresholds = matthew_corrcoef()
-
-
-def test_mcc(dataloader):
-    GCN_CNN.eval()
-    total_outputs = []
-    total_targets = []
-    with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(dataloader):
-
-            if train_on_GPU:
-                images, targets = images.cuda(), targets.cuda()
-
-            outputs = GCN_CNN(images, emb, adj)
-            outputs = torch.sigmoid(outputs)
-
-            total_outputs.append(outputs)
-            total_targets.append(targets)
-
-    result = calculate_metrics(
-        torch.cat(total_targets), torch.cat(total_outputs), best_thresholds)
-    print('N+: {:.0f}'.format(result['N+']))
-    print('per-class precision: {:.3f} \t per-class recall: {:.3f} \t per-class f1: {:.3f}'.format(
-        result['per_class/precision'], result['per_class/recall'], result['per_class/f1']))
-    print('per-image precision: {:.3f} \t per-image recall: {:.3f} \t per-image f1: {:.3f}'.format(
-        result['per_image/precision'], result['per_image/recall'], result['per_image/f1']))
-
-
-test_mcc(testloader)
+best_thresholds = matthew_corrcoef(traindataloader)
+print(best_thresholds)
+validation(testloader, mcc=True, thresholds=best_thresholds)
 
 
 # =============================================================================
 # Evaluate the model on a random test batch
 # =============================================================================
-def evaluation_testset(threshold='none'):
-    images, annotations = iter(testloader).next()
+def evaluation_testset(images, annotations, thresholds='none'):
     if train_on_GPU:
         images = images.cuda()
 
     GCN_CNN.eval()
     with torch.no_grad():
-        if threshold == 'none':
-            outputs = GCN_CNN(images, emb, adj)
-        elif threshold == 'mcc':
-            outputs = GCN_CNN(images, emb, adj)
-            outputs = torch.sigmoid(outputs)
+        outputs = torch.sigmoid(GCN_CNN(images, emb, adj))
 
-    fig = plt.figure(figsize=(50, 25))
-    for i in np.arange(batch_size):
+    fig = plt.figure(figsize=(60, 25))
+    for i in np.arange(32):
         ax = fig.add_subplot(4, 8, i+1)
         imshow(images[i].cpu())
         gt_anno = convertBinaryAnnotationsToClasses(annotations[i])
-        if threshold == 'none':
-            o = np.array(outputs.cpu() > 0, dtype='int')
-        elif threshold == 'mcc':
+        if thresholds == 'none':
+            o = np.array(outputs.cpu() > 0.5, dtype='int')
+        elif thresholds == 'mcc':
             for j in range(len(classes)):
                 outputs[:, j] = torch.gt(
                     outputs[:, j], best_thresholds[j]).float()
@@ -589,9 +563,11 @@ def evaluation_testset(threshold='none'):
                 string_pre += ele if ele == pre_anno[-1] else ele + ' - '
 
         ax.set_title(string_gt + '\n' + string_pre)
+        plt.savefig('./img.jpg')
 
 
-evaluation_testset(threshold='mcc')
+images, annotations = iter(testloader).next()
+evaluation_testset(images, annotations, thresholds='none')
 
 
 # =============================================================================
@@ -601,18 +577,14 @@ test_image_path = './Corel-5k/unlabeled images/'
 
 
 def evaluation_random_imgs(img, threshold='none'):
-    img = transform_test(img)
+    img = transform_validation(img)
     img = img.unsqueeze(0)
     if train_on_GPU:
         img = img.cuda()
 
     GCN_CNN.eval()
     with torch.no_grad():
-        if threshold == 'none':
-            output = GCN_CNN(img, emb, adj)
-        elif threshold == 'mcc':
-            output = GCN_CNN(img, emb, adj)
-            output = torch.sigmoid(output)
+        output = torch.sigmoid(GCN_CNN(img, emb, adj))
 
     if threshold == 'none':
         o = np.array(output.cpu() > 0, dtype='int')
@@ -634,4 +606,4 @@ def evaluation_random_imgs(img, threshold='none'):
 
 for i in range(1, 11):
     img = Image.open(test_image_path + str(i) + '.jpg')
-    evaluation_random_imgs(img, threshold='mcc')
+    evaluation_random_imgs(img, threshold='none')
