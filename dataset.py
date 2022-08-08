@@ -62,7 +62,7 @@ def corel_5k(input_size=(448, 448)):
     worker = 2
     input_size = input_size
     root = './Corel-5k/'
-    
+
     # 4500 images 1
     mean = [0.3928, 0.4079, 0.3531]
     std = [0.2559, 0.2436, 0.2544]
@@ -70,7 +70,7 @@ def corel_5k(input_size=(448, 448)):
     # 18000 images
     # mean = [0.4249, 0.4365, 0.3926]
     # std = [0.1955, 0.1830, 0.1987]
-    
+
     transform_train = transforms.Compose([
         transforms.Resize(input_size),
         transforms.RandomVerticalFlip(),

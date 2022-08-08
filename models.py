@@ -3,7 +3,6 @@
 # =============================================================================
 import torch
 from torch import nn
-import torchvision
 import timm
 
 import numpy as np
@@ -17,13 +16,13 @@ class TResNet(nn.Module):
         super(TResNet, self).__init__()
         self.path = './checkpoints/TResNet_Corel-5K.pth'
         self.name = 'TResNet'
-        
+
         tresnet = timm.create_model('tresnet_m', pretrained=pretrained)
         self.features = nn.Sequential(
             tresnet.body,
             tresnet.head.global_pool,
         )
-            
+
     def forward(self, img):
         feature = self.features(img)
         feature = torch.flatten(feature, 1)

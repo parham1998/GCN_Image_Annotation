@@ -226,33 +226,33 @@ lossFunction = 'AsymmetricLoss'
 if lossFunction == 'BCELoss':
     criterion = nn.MultiLabelSoftMarginLoss()
 elif lossFunction == 'FocalLoss':
-    criterion = MultiLabelLoss(gamma_neg=3, 
-							   gamma_pos=3,
-							   neg_margin=0)
+    criterion = MultiLabelLoss(gamma_neg=3,
+                               gamma_pos=3,
+                               neg_margin=0)
 elif lossFunction == 'AsymmetricLoss':
     criterion = MultiLabelLoss(gamma_neg=4,
-							   gamma_pos=0,
-							   neg_margin=0.05)
+                               gamma_pos=0,
+                               neg_margin=0.05)
 
 
 opt = "Adam"
 if opt == "SGD":
     epochs = 200
     lr = 0.5
-    optimizer = optim.SGD(GCN_CNN.get_config_optim(lr=lr), 
-					      lr=lr, 
-						  momentum=0.9, 
-						  weight_decay=1e-4)
+    optimizer = optim.SGD(GCN_CNN.get_config_optim(lr=lr),
+                          lr=lr,
+                          momentum=0.9,
+                          weight_decay=1e-4)
 elif opt == "Adam":
     epochs = 80
     lr = 0.0001
     optimizer = optim.Adam(GCN_CNN.get_config_optim(lr=lr),
-						   lr=lr)
+                           lr=lr)
     steps_per_epoch = len(trainloader)
-    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, 
-											  max_lr=lr, 
-											  steps_per_epoch=steps_per_epoch, 
-											  epochs=epochs, 
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
+                                              max_lr=lr,
+                                              steps_per_epoch=steps_per_epoch,
+                                              epochs=epochs,
                                               pct_start=0.2)
 
 
@@ -372,7 +372,7 @@ def train(epoch, dataloader, thresholds=0.5):
 
         # parameters update
         optimizer.step()
-        
+
         if opt == 'Adam':
             scheduler.step()
 
@@ -407,7 +407,7 @@ def validation(dataloader, mcc=False, thresholds=0.5):
                 images, targets = images.cuda(), targets.cuda()
 
             outputs = GCN_CNN(images, emb, adj)
-            
+
             if not mcc:
                 loss = criterion(outputs, targets)
                 valid_loss += loss.item()
@@ -459,7 +459,7 @@ print('==> End of training ...')
 fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 10))
 ax1.plot(train_losses, marker="o", markersize=5)
 ax1.set_title("Train Loss")
-ax2.plot(test_losses, marker="o", markersize=5)
+ax2.plot(valid_losses, marker="o", markersize=5)
 ax2.set_title("Test Loss")
 plt.show()
 
@@ -506,7 +506,8 @@ def matthew_corrcoef(dataloader):
     o = np.array(o[0].cpu())
 
     best_thresholds = []
-    threshold = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+    threshold = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35,
+                 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
     for i in range(len(classes)):
         mcc = []
@@ -520,7 +521,7 @@ def matthew_corrcoef(dataloader):
     return best_thresholds
 
 
-best_thresholds = matthew_corrcoef(traindataloader)
+best_thresholds = matthew_corrcoef(trainloader)
 print(best_thresholds)
 validation(testloader, mcc=True, thresholds=best_thresholds)
 
