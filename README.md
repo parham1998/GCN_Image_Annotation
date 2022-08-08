@@ -46,7 +46,7 @@ I've used per-class (per-label) and per-image (overall) precision, recall, and f
 
 (check out [CNN_Image_Annotation_evaluation_metrics](https://github.com/parham1998/CNN_Image_Annotaion#evaluation-metrics) for more information)
 
-## Reults
+## Results
 ### asymmetric loss (more information at [asymmetric loss](https://github.com/parham1998/CNN_Image_Annotaion#3-asymmetric-loss))
 
 best model | global-pooling | batch-size | num of training images | image-size | optimizer | epoch time | 𝛾+ | 𝛾- | m 
