@@ -1,21 +1,26 @@
 # =============================================================================
+# Install necessary packages
+# =============================================================================
+# pip install inplace-abn
+# pip install timm
+
+
+# =============================================================================
 # Import required libraries
 # =============================================================================
+import numpy as np
 import torch
 from torch import nn
 import timm
 
-import numpy as np
-
 
 # =============================================================================
-# CNNs
+# CNN
 # =============================================================================
 class TResNet(nn.Module):
-    def __init__(self, pretrained):
+    def __init__(self, args, pretrained):
         super(TResNet, self).__init__()
-        self.path = './checkpoints/TResNet_Corel-5K.pth'
-        self.name = 'TResNet'
+        self.path = args.save_dir + 'TResNet_Corel-5k.pth'
 
         tresnet = timm.create_model('tresnet_m', pretrained=pretrained)
         self.features = nn.Sequential(
@@ -23,8 +28,8 @@ class TResNet(nn.Module):
             tresnet.head.global_pool,
         )
 
-    def forward(self, img):
-        feature = self.features(img)
+    def forward(self, x):
+        feature = self.features(x)
         feature = torch.flatten(feature, 1)
         return feature
 
@@ -63,13 +68,18 @@ class GraphConvolution(nn.Module):
 # CNN-GCN
 # =============================================================================
 class GCNCNN(nn.Module):
-    def __init__(self, model, input_d=300, middle_d=1024, output_d=2048):
+    def __init__(self,
+                 args,
+                 cnn_model,
+                 input_d=300,
+                 middle_d=1024,
+                 output_d=2048):
         super(GCNCNN, self).__init__()
-        self.gcn1_path = './checkpoints/' + model.name + '_GCN1_Corel-5K.pth'
-        self.gcn2_path = './checkpoints/' + model.name + '_GCN2_Corel-5K.pth'
+        self.gcn1_path = args.save_dir + 'GCN1_Corel-5K.pth'
+        self.gcn2_path = args.save_dir + 'GCN2_Corel-5K.pth'
 
         # CNN model (features)
-        self.cnn = model
+        self.cnn = cnn_model
 
         self.gc1 = GraphConvolution(input_d, middle_d)
         self.gc2 = GraphConvolution(middle_d, output_d)
@@ -110,8 +120,3 @@ class GCNCNN(nn.Module):
             {'params': self.gc1.parameters(), 'lr': lr},
             {'params': self.gc2.parameters(), 'lr': lr},
         ]
-
-    def save(self, path_CNN):
-        torch.save(self.cnn.state_dict(), path_CNN)
-        torch.save(self.gc1.state_dict(), self.gcn1_path)
-        torch.save(self.gc2.state_dict(), self.gcn2_path)

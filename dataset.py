@@ -7,12 +7,13 @@ import numpy as np
 from PIL import Image
 
 import torch
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from sklearn.utils import shuffle
 
 
 # =============================================================================
-# Pytorch dataset format
+# Create annotation dataset
 # =============================================================================
 class AnnotationDataset(torch.utils.data.Dataset):
     def __init__(self, root, annotation_path, aug_path=None, transforms=None):
@@ -55,66 +56,113 @@ class AnnotationDataset(torch.utils.data.Dataset):
 
 
 # =============================================================================
-# Corel-5k settings
+# Make data loader
 # =============================================================================
-def corel_5k(input_size=(448, 448)):
-    batch_size = 32
-    worker = 2
-    input_size = input_size
-    root = './Corel-5k/'
+def get_mean_std(args):
+    if not args.augmentation:  # 4500 images
+        mean = [0.3928, 0.4079, 0.3531]
+        std = [0.2559, 0.2436, 0.2544]
+    else:  # 18000 images
+        mean = [0.4249, 0.4365, 0.3926]
+        std = [0.1955, 0.1830, 0.1987]
+    return mean, std
 
-    # 4500 images 1
-    mean = [0.3928, 0.4079, 0.3531]
-    std = [0.2559, 0.2436, 0.2544]
 
-    # 18000 images
-    # mean = [0.4249, 0.4365, 0.3926]
-    # std = [0.1955, 0.1830, 0.1987]
-
+def get_transforms(args):
+    mean, std = get_mean_std(args)
+    #
     transform_train = transforms.Compose([
-        transforms.Resize(input_size),
+        transforms.Resize((args.image_size, args.image_size)),
         transforms.RandomVerticalFlip(),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=mean,
             std=std,
-        ),
+        )
     ])
     transform_validation = transforms.Compose([
-        transforms.Resize(input_size),
+        transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=mean,
             std=std,
-        ),
+        )
     ])
-    return (batch_size, worker, input_size, root, mean, std,
-            transform_train, transform_validation)
+    return transform_train, transform_validation
+
+
+def make_data_loader(args):
+    root_dir = args.data_root_dir
+
+    transform_train, transform_validation = get_transforms(args)
+    #
+    if not args.augmentation:
+        train_set = AnnotationDataset(root=os.path.join(root_dir, 'images'),
+                                      annotation_path=os.path.join(
+                                      root_dir, 'train.json'),
+                                      transforms=transform_train)
+    else:
+        train_set = AnnotationDataset(root=os.path.join(root_dir, 'images'),
+                                      annotation_path=os.path.join(
+                                      root_dir, 'train.json'),
+                                      aug_path=os.path.join(
+                                          root_dir, 'train_aug.json'),
+                                      transforms=transform_train)
+    train_loader = DataLoader(train_set,
+                              batch_size=args.batch_size,
+                              num_workers=args.num_workers,
+                              shuffle=True)
+    #
+    validation_set = AnnotationDataset(root=os.path.join(root_dir, 'images'),
+                                       annotation_path=os.path.join(
+                                           root_dir, 'test.json'),
+                                       transforms=transform_validation)
+    validation_loader = DataLoader(validation_set,
+                                   batch_size=args.batch_size,
+                                   num_workers=args.num_workers,
+                                   shuffle=False)
+    #
+    classes = validation_set.classes
+    return train_loader, validation_loader, train_set.annotations, classes
 
 
 # =============================================================================
-# Define mean & std
+# Word embedding
 # =============================================================================
-'''def get_mean_and_std(trainloader):
-    mean, std, n_b = 0, 0, 0
-    for images, _ in trainloader:
-        mean += images.mean([0, 2, 3])
-        std += torch.mean(images**2, [0, 2, 3])
-        n_b += 1
-    mean = mean / n_b
-    std = (std / n_b - mean**2)**0.5
-    return mean, std
-root = './Corel-5k/'
-trainset = AnnotationDataset(
-    root=os.path.join(root, 'images'),
-    annotation_path=os.path.join(root, 'train.json'),
-    aug_path=os.path.join(root, 'train_aug.json'),
-    transforms=transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor()
-    ])
-)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=32,
-                                          shuffle=False)
-mean, std = get_mean_and_std(trainloader)'''
+def word_embedding(glove_path, classes):
+    with open(glove_path, 'r', encoding='UTF-8') as f:
+        words = set()
+        word_to_vec_map = {}
+        for line in f:
+            line = line.strip().split()
+            curr_word = line[0]
+            words.add(curr_word)
+            word_to_vec_map[curr_word] = np.array(line[1:], dtype=np.float32)
+    #
+    emb = []
+    for word in classes:
+        emb.append(word_to_vec_map[word])
+    return torch.from_numpy(np.array(emb))
+
+
+# =============================================================================
+# Define adjacency matrix
+# =============================================================================
+def adjacency_matrix(annotations, num_classes, th=0.1, p=0.2):
+    adj = np.zeros((num_classes, num_classes))
+    anno = np.array(annotations)
+    sum_anno = np.sum(anno, axis=0)
+    for i in range(0, num_classes):
+        N = sum_anno[i]
+        for j in range(0, num_classes):
+            if i != j:
+                M = np.sum(anno[:, i] * anno[:, j])
+                adj[i, j] = M/N
+    # binary
+    adj[adj < th] = 0
+    adj[adj >= th] = 1
+    #
+    adj = adj * p / (adj.sum(0, keepdims=True) + 1e-07)
+    adj = adj + (1-p) * np.identity(num_classes, np.int32)
+    return torch.Tensor(adj)
