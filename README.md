@@ -42,31 +42,43 @@ The image below shows the relations between labels after training by GCN (t-sne:
 
 ## Evaluation Metrics
 <div align="justify"> Precision, Recall, F1-score, and N+ are the most popular metrics for evaluating different models in image annotation tasks.
-I've used per-class (per-label) and per-image (overall) precision, recall, and f1-score, and also N+ which are common in image annotation papers. </div>
+I've used per-class (per-label) and per-image (overall) precision, recall, f1-score, and also N+ which are common in image annotation papers. </div>
 
 (check out [CNN_Image_Annotation_evaluation_metrics](https://github.com/parham1998/CNN_Image_Annotaion#evaluation-metrics) for more information)
+
+## Train and Evaluation
+To train the model in Spyder IDE use the code below:
+```python
+run main.py --loss-function {select loss function}
+```
+Please note that:
+1) You should put **BCELoss**, **FocalLoss** or **AsymmetricLoss** in {select loss function}.
+  
+Using augmented data, you can train the model as follows:
+```python
+run main.py --loss-function {select loss function} --augmentation
+```
+  
+To evaluate the model in Spyder IDE use the code below:
+```python
+run main.py --loss-function {select loss function} --evaluate
+```
 
 ## Results
 ### asymmetric loss (more information at [asymmetric loss](https://github.com/parham1998/CNN_Image_Annotaion#3-asymmetric-loss))
 
-best model | global-pooling | batch-size | num of training images | image-size | optimizer | epoch time | 𝛾+ | 𝛾- | m 
------------- | ------------ | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- | ------------- | -------------
-TResNet-m | avg | 32 | 4500 | 448 * 448 | Adam | 135s | 0 | 4 | 0.05
+| global-pooling | batch-size | num of training images | image-size | epoch time | 𝛾+ | 𝛾- | m 
+| :------------: | :------------: | :------------: | :------------: | :------------: | :------------: | :------------: | :------------: |
+| avg | 32 | 4500 | 448 * 448 | 135s | 0 | 4 | 0.05 |
   
-data | precision | recall | f1-score 
------------- | ------------- | ------------- | -------------
-*trainset* per-image metrics | 0.781 | 0.983 | 0.870 
-*testset* per-image metrics | 0.594  | 0.670 | 0.630
-*trainset* per-class metrics | 0.697  | 0.969 | 0.811
-*testset* per-class metrics | 0.453 | 0.495 | 0.473
+| data | precision | recall | f1-score |
+| :------------: | :------------: | :------------: | :------------: |
+| *testset* per-image metrics | 0.594  | 0.670 | 0.630 | 
+| *testset* per-class metrics | 0.453 | 0.495 | **0.473** |
 
-data | N+ 
------------- | ------------- 
-*trainset* | 260
-*testset* | 175
-
-## Conclusions
-coming soon ...
+| data | N+ |
+| :------------: | :------------: |
+| *testset* | 175 |
 
 ## References
 Z-M. Chen, X-S. Wei, P. Wang, and Y. Guo. <br />
